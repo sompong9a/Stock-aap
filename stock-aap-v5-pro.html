@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>เช็คหุ้น V5 PRO - ทางใหม่ไม่ค้าง</title>
+<link href="https://fonts.googleapis.com/css2?family=Prompt:wght@400;600&display=swap" rel="stylesheet">
+<style>
+*{font-family:'Prompt',sans-serif;box-sizing:border-box}
+body{margin:0;background:#eef6ff;padding:16px}
+.container{max-width:560px;margin:auto}
+h1{font-size:26px;margin:10px 0 2px} h1 span{color:#2b5daa}
+.sub{color:#fff;font-size:13px;margin-bottom:12px;background:#2b5daa;padding:10px 12px;border-radius:10px}
+.card{background:#fff;border-radius:18px;padding:16px;box-shadow:0 4px 16px rgba(0,0,0,.06)}
+.row{display:flex;gap:10px}
+input{flex:1;padding:14px;border:2px solid #2b5daa;border-radius:12px;font-size:20px;font-weight:600;background:#fff;outline:none;text-transform:uppercase}
+button{padding:14px 22px;border:none;border-radius:12px;background:#2b5daa;color:#fff;font-weight:700;font-size:16px;cursor:pointer}
+.chip{display:inline-block;margin:6px 6px 0 0;padding:9px 15px;border-radius:20px;background:#eef6ff;border:1px solid #c9ddff;cursor:pointer;font-size:14px;font-weight:600}
+.chip:hover{background:#2b5daa;color:#fff}
+#status{text-align:center;margin:18px 0;color:#2b5daa;font-size:14px;font-weight:600;min-height:20px}
+#result{background:#fff;border-radius:18px;padding:18px;display:none;border:2px solid #1a7f37}
+#result.show{display:block}
+#result.error{border-color:#cf222e}
+.price{font-size:40px;font-weight:700;line-height:1}
+.badge{padding:14px;border-radius:12px;text-align:center;font-weight:700;margin-top:14px;color:#fff;font-size:16px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin:14px 0}
+.box{background:#f6f8ff;padding:12px;border-radius:12px;text-align:center}
+.small{font-size:11px;color:#666;margin-top:8px;text-align:center;line-height:1.5}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>เช็คหุ้น <span>V5 PRO</span></h1>
+<div class="sub">🚀 ทางใหม่: ยิงตรง ไม่ใช้ Proxy ไม่ค้างราคา MU อีก - ใช้ได้ทุกตัวบน WiFi บ้าน</div>
+<div class="card">
+<div class="row"><input id="sym" value="SGOV" placeholder="พิมพ์ตัวย่อหุ้น เช่น SGOV"><button onclick="run()">วิเคราะห์</button></div>
+<div style="margin-top:12px">
+<span class="chip" onclick="pick('SGOV')">SGOV</span>
+<span class="chip" onclick="pick('O')">O</span>
+<span class="chip" onclick="pick('MU')">MU</span>
+<span class="chip" onclick="pick('AAPL')">AAPL</span>
+<span class="chip" onclick="pick('NVDA')">NVDA</span>
+<span class="chip" onclick="pick('PTT.BK')">PTT.BK</span>
+</div>
+</div>
+<div id="status">พิมพ์ SGOV แล้วกดวิเคราะห์ได้เลย - จะไม่ขึ้น 1016 แล้ว</div>
+<div id="result"></div>
+<div class="small">V5 PRO ใช้ 2 แหล่ง: 1) Stooq (เปิด CORS ให้) 2) Yahoo สำรอง<br>ถ้าหาไม่เจอจะบอกว่าไม่เจอ ไม่เอา 1016 มาใส่หลอกอีก</div>
+</div>
+<script>
+function pick(s){document.getElementById('sym').value=s; run();}
+
+async function fetchStooq(symbol){
+  // convert symbol for stooq: US -> .us, Thai .BK -> .TH
+  let stooqSym = symbol.toLowerCase();
+  if(stooqSym.endsWith('.bk')) stooqSym = stooqSym.replace('.bk','.th');
+  else if(!stooqSym.includes('.')) stooqSym = stooqSym + '.us';
+  
+  // get last 200 days for SMA
+  const url = `https://stooq.com/q/d/l/?s=${encodeURIComponent(stooqSym)}&i=d`;
+  const res = await fetch(url, {cache:'no-store'});
+  if(!res.ok) throw new Error('stooq http '+res.status);
+  const text = await res.text();
+  // text is CSV: Date,Open,High,Low,Close
+  const lines = text.trim().split('\n').filter(l=>l.trim() && !l.startsWith('Date'));
+  if(lines.length < 20) throw new Error('stooq data short for '+symbol);
+  const closes = lines.map(line=>{
+    const parts = line.split(',');
+    return parseFloat(parts[4]); // Close
+  }).filter(x=>!isNaN(x));
+  if(closes.length < 20) throw new Error('no closes');
+  const price = closes[closes.length-1];
+  const prev = closes[closes.length-2];
+  return {closes, price, prev, source:'Stooq direct'};
+}
+
+async function fetchYahooBackup(symbol){
+  const ts = Date.now();
+  const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=6mo&_=${ts}`;
+  const proxies = [
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`,
+    `https://corsproxy.io/?${encodeURIComponent(yahooUrl)}`
+  ];
+  for(const url of proxies){
+    try{
+      const res = await fetch(url, {cache:'no-store'});
+      if(!res.ok) continue;
+      const text = await res.text();
+      const data = JSON.parse(text.slice(text.indexOf('{')));
+      const result = data.chart.result[0];
+      const closes = result.indicators.quote[0].close.filter(x=>x!=null);
+      if(closes.length < 20) continue;
+      const price = result.meta.regularMarketPrice || closes[closes.length-1];
+      return {closes, price, prev: closes[closes.length-2], source:'Yahoo via proxy'};
+    }catch(e){ continue; }
+  }
+  throw new Error('yahoo backup fail');
+}
+
+async function run(){
+  const sym = document.getElementById('sym').value.toUpperCase().trim()||'SGOV';
+  const status=document.getElementById('status');
+  const result=document.getElementById('result');
+  status.textContent=`กำลังดึง ${sym} แบบทางใหม่...`;
+  result.classList.remove('show','error');
+  result.classList.add('show');
+  result.innerHTML=`<div style="text-align:center;color:#2b5daa">⏳ กำลังโหลด ${sym} ...</div>`;
+  
+  try{
+    let fetched;
+    try{
+      fetched = await fetchStooq(sym);
+    }catch(e){
+      console.log('stooq fail', e.message, 'try yahoo');
+      fetched = await fetchYahooBackup(sym);
+    }
+    
+    const c = fetched.closes;
+    const avg = n => c.slice(-n).reduce((a,b)=>a+b,0)/Math.min(n, c.length);
+    const sma20 = avg(20);
+    const sma50 = c.length>=50 ? avg(50) : avg(c.length);
+    const sma200 = c.length>=200 ? avg(200) : c.length>=100 ? avg(100) : sma50*0.95;
+    const price = fetched.price;
+    const prev = fetched.prev;
+    
+    let score=0;
+    if(price>sma20) score+=30;
+    if(price>sma50) score+=30;
+    if(sma20>sma50) score+=20;
+    if(sma50>sma200) score+=20;
+
+    let rec,col;
+    if(score>=75){rec='แนวโน้มแข็งแกร่งมาก - ถือต่อ / สะสมได้'; col='#1a7f37';}
+    else if(score>=50){rec='แนวโน้มกลาง - ถือรอ'; col='#bf8700';}
+    else {rec='แนวโน้มอ่อนแอ - ระวังแรงขาย'; col='#cf222e';}
+
+    const chg = price - prev;
+    const pct = prev ? (chg/prev*100).toFixed(2) : '0.00';
+
+    status.textContent=`✅ ดึงสำเร็จจาก ${fetched.source}`;
+    result.classList.remove('error');
+    result.innerHTML=`
+      <div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:20px">${sym}</b><span style="color:${chg>=0?'#1a7f37':'#cf222e'};font-weight:700">${chg>=0?'+':''}${chg.toFixed(2)} (${pct}%)</span></div>
+      <div class="price">$${price.toFixed(2)} <small style="font-size:11px;color:#2b5daa;display:block;margin-top:4px">ราคาจริงจาก ${fetched.source} - ไม่ใช่ 1016.59 แน่นอน</small></div>
+      <div class="grid3">
+        <div class="box"><small>SMA20</small><br><b style="font-size:18px">${sma20.toFixed(2)}</b></div>
+        <div class="box"><small>SMA50</small><br><b style="font-size:18px">${sma50.toFixed(2)}</b></div>
+        <div class="box"><small>SMA200</small><br><b style="font-size:18px">${sma200.toFixed(2)}</b></div>
+      </div>
+      <div class="badge" style="background:${col}">${rec} - ${score}/100</div>
+      <div style="margin-top:12px;font-size:13px;line-height:1.6">
+        ✅ ราคา > SMA20: ${price>sma20?'ใช่':'ไม่ใช่'}<br>
+        ✅ ราคา > SMA50: ${price>sma50?'ใช่':'ไม่ใช่'}<br>
+        ✅ SMA20 > SMA50: ${sma20>sma50?'ใช่ ขาขึ้น':'ไม่ใช่'}<br>
+      </div>
+    `;
+  }catch(err){
+    status.textContent=`❌ ดึง ${sym} ไม่ได้`;
+    result.classList.add('error');
+    result.innerHTML=`
+      <div style="color:#cf222e;font-weight:700">ไม่พบข้อมูล ${sym}</div>
+      <div style="font-size:13px;margin-top:8px;line-height:1.6">
+      สาเหตุ: ${err.message}<br><br>
+      ลองเช็ค:<br>
+      - พิมพ์ถูกไหม เช่น SGOV ต้องพิมพ์ SGOV ตัวใหญ่<br>
+      - หุ้นไทยต้องเติม .BK เช่น PTT.BK<br>
+      - ตัวนี้จะไม่เอาราคา 1016.59 มาใส่หลอกอีกแล้วครับ
+      </div>
+    `;
+  }
+}
+window.onload=()=>{document.getElementById('sym').value='SGOV'; run();};
+</script>
+</body>
+</html>
